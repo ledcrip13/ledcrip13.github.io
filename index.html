@@ -627,14 +627,14 @@ peer.on("open",function(){
   document.getElementById("peerHud").textContent="хост";
 });
 peer.on("connection",function(conn){
-  var pid=conn.peer;
-  // Список всех уже подключённых (кроме нового) — без ID самого хоста
   var ids=Object.keys(peers);
   setupConn(conn);
-  conn.on("open",function(){
+  function sendList(){
     conn.send({type:"peers",ids:ids});
     document.getElementById("peerHud").textContent="хост / "+Object.keys(peers).length+" игр";
-  });
+  }
+  if(conn.open)sendList();
+  else conn.on("open",sendList);
 });
 peer.on("error",function(err){
   if(err.type==="unavailable-id"){
