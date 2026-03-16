@@ -620,41 +620,53 @@ function onData(pid,d){
   }
 }
 
-// Сначала пробуем стать хостом с фиксированным ID
-peer=new Peer(ROOM,{debug:0});
-peer.on("open",function(){
-  isHost=true;
-  document.getElementById("peerHud").textContent="хост";
-});
-peer.on("connection",function(conn){
-  var ids=Object.keys(peers);
-  setupConn(conn);
-  function sendList(){
-    conn.send({type:"peers",ids:ids});
-    document.getElementById("peerHud").textContent="хост / "+Object.keys(peers).length+" игр";
-  }
-  if(conn.open)sendList();
-  else conn.on("open",sendList);
-});
-peer.on("error",function(err){
-  if(err.type==="unavailable-id"){
-    // Хост уже есть — подключаемся как клиент
-    peer=new Peer(undefined,{debug:0});
-    peer.on("open",function(){
-      document.getElementById("peerHud").textContent="подключение...";
-      var h=peer.connect(ROOM,{serialization:"json"});
-      setupConn(h);
-      h.on("open",function(){
-        document.getElementById("peerHud").textContent="в игре";
+function startPeer(){
+  peer=new Peer(ROOM,{debug:0});
+  peer.on("open",function(){
+    isHost=true;
+    document.getElementById("peerHud").textContent="хост";
+  });
+  peer.on("connection",function(conn){
+    var ids=Object.keys(peers);
+    setupConn(conn);
+    function sendList(){
+      conn.send({type:"peers",ids:ids});
+      document.getElementById("peerHud").textContent="хост / "+Object.keys(peers).length+" игр";
+    }
+    if(conn.open)sendList();
+    else conn.on("open",sendList);
+  });
+  peer.on("error",function(err){
+    if(err.type==="unavailable-id"){
+      // Хост уже есть — подключаемся как клиент
+      peer=new Peer(undefined,{debug:0});
+      peer.on("open",function(){
+        document.getElementById("peerHud").textContent="подключение...";
+        var h=peer.connect(ROOM,{serialization:"json",reliable:true});
+        var connected=false;
+        var timeout=setTimeout(function(){
+          if(!connected){
+            // Хост не ответил — пробуем сами стать хостом
+            document.getElementById("peerHud").textContent="пересоединение...";
+            peer.destroy();
+            setTimeout(startPeer,1500);
+          }
+        },5000);
+        setupConn(h);
+        h.on("open",function(){
+          connected=true;
+          clearTimeout(timeout);
+          document.getElementById("peerHud").textContent="в игре";
+        });
       });
-    });
-    // Принимаем входящие от других клиентов (из списка peers)
-    peer.on("connection",function(conn){
-      setupConn(conn);
-    });
-    peer.on("error",function(){});
-  }
-});
+      peer.on("connection",function(conn){setupConn(conn);});
+      peer.on("error",function(){});
+    }
+  });
+}
+startPeer();
+// Освобождаем ID при закрытии вкладки
+window.addEventListener("beforeunload",function(){if(peer)peer.destroy();});
 
 // Обработчики паузы
 var pauseBtn=document.getElementById("pauseBtn");
