@@ -140,6 +140,7 @@ div.peer-hud{position:fixed;top:8px;left:50%;transform:translateX(-50%);font-siz
 <div class="main-menu" id="mainMenu" style="display:none"></div>
 
 <div class="peer-hud" id="peerHud" style="position:fixed;bottom:20px;left:20px;color:rgba(255,255,255,0.5);font-size:12px;"></div>
+<div id="dbgLog" style="position:fixed;top:40px;left:8px;right:8px;font-size:11px;color:#0f0;background:rgba(0,0,0,0.6);padding:4px;z-index:999;pointer-events:none;max-height:160px;overflow:hidden;line-height:1.4;"></div>
 
 <script>
 (function(){
@@ -620,20 +621,28 @@ function onData(pid,d){
   }
 }
 
+var _dbgLines=[];
+function dbg(msg){
+  _dbgLines.push(msg);
+  if(_dbgLines.length>8)_dbgLines.shift();
+  var el=document.getElementById("dbgLog");
+  if(el)el.innerHTML=_dbgLines.join("<br>");
+}
+
 function startPeer(){
-  console.log("[MP] startPeer() вызван");
-  peer=new Peer(ROOM,{debug:1});
+  dbg("startPeer()");
+  peer=new Peer(ROOM,{debug:0});
   peer.on("open",function(){
     isHost=true;
-    console.log("[MP] Я хост, ID:",peer.id);
+    dbg("ХОЗ: "+peer.id.slice(0,12));
     document.getElementById("peerHud").textContent="хост";
   });
   peer.on("connection",function(conn){
-    console.log("[MP] Хост: входящее подключение от",conn.peer);
+    dbg("ХОЗ: коннект от "+conn.peer.slice(0,8));
     var ids=Object.keys(peers);
     setupConn(conn);
     function sendList(){
-      console.log("[MP] Хост: отправляю список пиров",ids,"→",conn.peer);
+      dbg("ХОЗ: шлю список ["+ids.length+"] → "+conn.peer.slice(0,8));
       conn.send({type:"peers",ids:ids});
       document.getElementById("peerHud").textContent="хост / "+Object.keys(peers).length+" игр";
     }
@@ -641,18 +650,18 @@ function startPeer(){
     else conn.on("open",sendList);
   });
   peer.on("error",function(err){
-    console.log("[MP] Ошибка peer:",err.type);
+    dbg("ОШИБКА: "+err.type);
     if(err.type==="unavailable-id"){
-      console.log("[MP] ID занят, подключаюсь как клиент");
-      peer=new Peer(undefined,{debug:1});
+      dbg("ID занят → клиент");
+      peer=new Peer(undefined,{debug:0});
       peer.on("open",function(){
-        console.log("[MP] Клиент открыт, ID:",peer.id," подключаюсь к хосту...");
+        dbg("КЛТ открыт: "+peer.id.slice(0,8));
         document.getElementById("peerHud").textContent="подключение...";
         var h=peer.connect(ROOM,{serialization:"json",reliable:true});
         var connected=false;
         var timeout=setTimeout(function(){
           if(!connected){
-            console.log("[MP] Хост не ответил, пробую стать хостом сам");
+            dbg("Хост не ответил → пересоединение");
             document.getElementById("peerHud").textContent="пересоединение...";
             peer.destroy();
             setTimeout(startPeer,1500);
@@ -662,15 +671,15 @@ function startPeer(){
         h.on("open",function(){
           connected=true;
           clearTimeout(timeout);
-          console.log("[MP] Подключён к хосту!");
+          dbg("КЛТ: подключён к хосту!");
           document.getElementById("peerHud").textContent="в игре";
         });
       });
       peer.on("connection",function(conn){
-        console.log("[MP] Клиент: входящее от",conn.peer);
+        dbg("КЛТ: входящее от "+conn.peer.slice(0,8));
         setupConn(conn);
       });
-      peer.on("error",function(e){console.log("[MP] Клиент ошибка:",e.type);});
+      peer.on("error",function(e){dbg("КЛТ ошибка: "+e.type);});
     }
   });
 }
