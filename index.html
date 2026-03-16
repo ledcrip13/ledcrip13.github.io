@@ -533,7 +533,6 @@ var peer=null,isHost=false;
 var peers={};
 var remoteMeshes={};
 var netTimer=0;
-var netTimer=0;
 
 function tap(id,fn){
   var el=document.getElementById(id);
@@ -576,6 +575,7 @@ function hideAllMenus(){
 // === МУЛЬТИПЛЕЕР ===
 var ROOM="striker-v5";
 gameMode="online";
+hideAllMenus();
 player.pos.set(Math.random()*14-7,0,Math.random()*14-7);
 player.hp=150;player.ammo=AK.mag;player.reserve=AK.res*2;
 updHpUI();updAmmoUI();
