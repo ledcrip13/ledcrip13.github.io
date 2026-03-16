@@ -301,15 +301,17 @@ function shoot(){
   var dir=new THREE.Vector3((Math.random()-0.5)*AK.spread,(Math.random()-0.5)*AK.spread,-1).normalize();
   dir.applyQuaternion(camera.quaternion);
   var ray=new THREE.Raycaster(camera.position.clone(),dir,0,100);
-  if(gameMode==="online"&&remoteMesh){
-    var rmHits=ray.intersectObjects([remoteMesh],true);
-    if(rmHits.length>0){
-      showMsg("HIT",500);
-      var hel2=document.getElementById("hitM");
-      if(hel2){hel2.style.opacity="1";
-      setTimeout(function(){if(hel2)hel2.style.opacity="0";},110);}
-      sendPeer({type:"shoot"});
-    }
+  if(gameMode==="online"){
+    Object.keys(remoteMeshes).forEach(function(pid){
+      var rm=remoteMeshes[pid];
+      var hits=ray.intersectObjects([rm],true);
+      if(hits.length>0){
+        showMsg("HIT",500);
+        var hel2=document.getElementById("hitM");
+        if(hel2){hel2.style.opacity="1";setTimeout(function(){if(hel2)hel2.style.opacity="0";},110);}
+        if(peers[pid]&&peers[pid].open)peers[pid].send({type:"shoot"});
+      }
+    });
   }
   var bms=bots.filter(function(b){return b.alive;}).map(function(b){return b.mesh;});
   var bh=ray.intersectObjects(bms,true);
@@ -527,8 +529,10 @@ updHpUI();
 
 var gameMode="none";
 var isPaused=false;
-var peer=null,peerConn=null,isHost=false;
-var remoteMesh=null;
+var peer=null,isHost=false;
+var peers={};
+var remoteMeshes={};
+var netTimer=0;
 var netTimer=0;
 
 function tap(id,fn){
@@ -569,36 +573,85 @@ function hideAllMenus(){
 }
 
 
-// Инициализация Peer сразу
-if(typeof Peer !== 'undefined') {
-  peer = new Peer({debug:0});
+// === МУЛЬТИПЛЕЕР ===
+var ROOM="striker-v5";
+gameMode="online";
+player.pos.set(Math.random()*14-7,0,Math.random()*14-7);
+player.hp=150;player.ammo=AK.mag;player.reserve=AK.res*2;
+updHpUI();updAmmoUI();
+
+function setupConn(conn){
+  var pid=conn.peer;
+  peers[pid]=conn;
+  conn.on("data",function(d){onData(pid,d);});
+  conn.on("close",function(){removePeer(pid);});
+  conn.on("error",function(){removePeer(pid);});
+}
+function removePeer(pid){
+  delete peers[pid];
+  if(remoteMeshes[pid]){scene.remove(remoteMeshes[pid]);delete remoteMeshes[pid];}
+  document.getElementById("peerHud").textContent="игроков: "+Object.keys(peers).length;
+}
+function sendPeer(obj){
+  Object.values(peers).forEach(function(c){if(c&&c.open)c.send(obj);});
+}
+function onData(pid,d){
+  if(d.type==="pos"){
+    if(!remoteMeshes[pid])remoteMeshes[pid]=mkRemoteMesh(new THREE.Vector3(d.x,0,d.z));
+    remoteMeshes[pid].position.set(d.x,0,d.z);
+    remoteMeshes[pid].rotation.y=d.yaw+Math.PI;
+  }else if(d.type==="shoot"){
+    dealDamageToPlayer(AK.dmg);
+  }else if(d.type==="dead"){
+    showMsg("враг убит",1200);
+    if(remoteMeshes[pid]){scene.remove(remoteMeshes[pid]);delete remoteMeshes[pid];}
+  }else if(d.type==="peers"){
+    d.ids.forEach(function(id){
+      if(id!==peer.id&&!peers[id]){
+        var c=peer.connect(id,{serialization:"json"});
+        c.on("open",function(){setupConn(c);});
+        c.on("error",function(){});
+      }
+    });
+  }
 }
 
-// Запуск игры сразу в онлайн режиме
-gameMode = "online";
-player.pos.set(Math.random()*20-10, 0, Math.random()*20-10);
-player.hp = 150;
-player.ammo = AK.mag;
-player.reserve = AK.res * 2;
-updHpUI();
-updAmmoUI();
-
-// Подключение к серверу PeerJS (используем фиксированный ID)
-peer = new Peer("striker-server", {debug:0});
-
-peer.on("open", function(id) {
-  console.log("Connected to server with ID:", id);
-  setText("peerHud", "подключен");
+// Сначала пробуем стать хостом с фиксированным ID
+peer=new Peer(ROOM,{debug:0});
+peer.on("open",function(){
+  isHost=true;
+  document.getElementById("peerHud").textContent="хост";
 });
-
-peer.on("connection", function(conn) {
-  console.log("Новый игрок подключился");
-  peerConn = conn;
-  setupConn(conn);
+peer.on("connection",function(conn){
+  conn.on("open",function(){
+    setupConn(conn);
+    // Отправляем новому игроку список всех остальных
+    var ids=Object.keys(peers).filter(function(id){return id!==conn.peer;});
+    ids.push(peer.id);
+    conn.send({type:"peers",ids:ids});
+    document.getElementById("peerHud").textContent="хост / "+Object.keys(peers).length+" игр";
+  });
 });
-
-peer.on("error", function(err) {
-  console.log("Peer error:", err);
+peer.on("error",function(err){
+  if(err.type==="unavailable-id"){
+    // Хост уже есть — подключаемся как клиент
+    peer=new Peer(undefined,{debug:0});
+    peer.on("open",function(){
+      document.getElementById("peerHud").textContent="подключение...";
+      var h=peer.connect(ROOM,{serialization:"json"});
+      h.on("open",function(){
+        setupConn(h);
+        document.getElementById("peerHud").textContent="в игре";
+      });
+      h.on("error",function(){
+        document.getElementById("peerHud").textContent="ошибка";
+      });
+    });
+    peer.on("connection",function(conn){
+      conn.on("open",function(){setupConn(conn);});
+    });
+    peer.on("error",function(){});
+  }
 });
 
 // Обработчики паузы
@@ -637,30 +690,13 @@ function makeCode(){
   return s;
 }
 
-function setupConn(conn){
-  conn.on("data",handlePeerData);
-  conn.on("close",function(){document.getElementById("peerHud").textContent="отключён";peerConn=null;});
-}
 
-function sendPeer(obj){if(peerConn&&peerConn.open)peerConn.send(obj);}
 
-function handlePeerData(d){
-  if(d.type==="pos"){
-    if(remoteMesh){remoteMesh.position.set(d.x,0,d.z);remoteMesh.rotation.y=d.yaw+Math.PI;}
-  }else if(d.type==="shoot"){
-    dealDamageToPlayer(AK.dmg);
-  }else if(d.type==="dead"){
-    showMsg("враг убит",1200);
-    if(remoteMesh){scene.remove(remoteMesh);remoteMesh=null;}
-    setTimeout(spawnRemote,2000);
-  }
-}
 
-function spawnRemote(){
-  if(remoteMesh){scene.remove(remoteMesh);remoteMesh=null;}
-  var sp=isHost?new THREE.Vector3(5,0,18):new THREE.Vector3(-5,0,-18);
-  remoteMesh=mkRemoteMesh(sp);
-}
+
+
+
+
 
 function mkRemoteMesh(pos){
   var root=new THREE.Group();root.position.copy(pos);
