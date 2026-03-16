@@ -621,15 +621,19 @@ function onData(pid,d){
 }
 
 function startPeer(){
-  peer=new Peer(ROOM,{debug:0});
+  console.log("[MP] startPeer() вызван");
+  peer=new Peer(ROOM,{debug:1});
   peer.on("open",function(){
     isHost=true;
+    console.log("[MP] Я хост, ID:",peer.id);
     document.getElementById("peerHud").textContent="хост";
   });
   peer.on("connection",function(conn){
+    console.log("[MP] Хост: входящее подключение от",conn.peer);
     var ids=Object.keys(peers);
     setupConn(conn);
     function sendList(){
+      console.log("[MP] Хост: отправляю список пиров",ids,"→",conn.peer);
       conn.send({type:"peers",ids:ids});
       document.getElementById("peerHud").textContent="хост / "+Object.keys(peers).length+" игр";
     }
@@ -637,16 +641,18 @@ function startPeer(){
     else conn.on("open",sendList);
   });
   peer.on("error",function(err){
+    console.log("[MP] Ошибка peer:",err.type);
     if(err.type==="unavailable-id"){
-      // Хост уже есть — подключаемся как клиент
-      peer=new Peer(undefined,{debug:0});
+      console.log("[MP] ID занят, подключаюсь как клиент");
+      peer=new Peer(undefined,{debug:1});
       peer.on("open",function(){
+        console.log("[MP] Клиент открыт, ID:",peer.id," подключаюсь к хосту...");
         document.getElementById("peerHud").textContent="подключение...";
         var h=peer.connect(ROOM,{serialization:"json",reliable:true});
         var connected=false;
         var timeout=setTimeout(function(){
           if(!connected){
-            // Хост не ответил — пробуем сами стать хостом
+            console.log("[MP] Хост не ответил, пробую стать хостом сам");
             document.getElementById("peerHud").textContent="пересоединение...";
             peer.destroy();
             setTimeout(startPeer,1500);
@@ -656,11 +662,15 @@ function startPeer(){
         h.on("open",function(){
           connected=true;
           clearTimeout(timeout);
+          console.log("[MP] Подключён к хосту!");
           document.getElementById("peerHud").textContent="в игре";
         });
       });
-      peer.on("connection",function(conn){setupConn(conn);});
-      peer.on("error",function(){});
+      peer.on("connection",function(conn){
+        console.log("[MP] Клиент: входящее от",conn.peer);
+        setupConn(conn);
+      });
+      peer.on("error",function(e){console.log("[MP] Клиент ошибка:",e.type);});
     }
   });
 }
