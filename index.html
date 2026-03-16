@@ -580,17 +580,22 @@ player.pos.set(Math.random()*14-7,0,Math.random()*14-7);
 player.hp=150;player.ammo=AK.mag;player.reserve=AK.res*2;
 updHpUI();updAmmoUI();
 
-function setupConn(conn){
-  var pid=conn.peer;
+function addPeer(pid,conn){
   peers[pid]=conn;
-  conn.on("data",function(d){onData(pid,d);});
-  conn.on("close",function(){removePeer(pid);});
-  conn.on("error",function(){removePeer(pid);});
+  document.getElementById("peerHud").textContent="игроков: "+Object.keys(peers).length;
 }
 function removePeer(pid){
   delete peers[pid];
   if(remoteMeshes[pid]){scene.remove(remoteMeshes[pid]);delete remoteMeshes[pid];}
   document.getElementById("peerHud").textContent="игроков: "+Object.keys(peers).length;
+}
+function setupConn(conn){
+  var pid=conn.peer;
+  conn.on("data",function(d){onData(pid,d);});
+  conn.on("close",function(){removePeer(pid);});
+  conn.on("error",function(){removePeer(pid);});
+  conn.on("open",function(){addPeer(pid,conn);});
+  if(conn.open)addPeer(pid,conn);
 }
 function sendPeer(obj){
   Object.values(peers).forEach(function(c){if(c&&c.open)c.send(obj);});
@@ -609,8 +614,7 @@ function onData(pid,d){
     d.ids.forEach(function(id){
       if(id!==peer.id&&!peers[id]){
         var c=peer.connect(id,{serialization:"json"});
-        c.on("open",function(){setupConn(c);});
-        c.on("error",function(){});
+        setupConn(c);
       }
     });
   }
@@ -623,11 +627,11 @@ peer.on("open",function(){
   document.getElementById("peerHud").textContent="хост";
 });
 peer.on("connection",function(conn){
+  var pid=conn.peer;
+  // Список всех уже подключённых (кроме нового) — без ID самого хоста
+  var ids=Object.keys(peers);
+  setupConn(conn);
   conn.on("open",function(){
-    setupConn(conn);
-    // Отправляем новому игроку список всех остальных
-    var ids=Object.keys(peers).filter(function(id){return id!==conn.peer;});
-    ids.push(peer.id);
     conn.send({type:"peers",ids:ids});
     document.getElementById("peerHud").textContent="хост / "+Object.keys(peers).length+" игр";
   });
@@ -639,16 +643,14 @@ peer.on("error",function(err){
     peer.on("open",function(){
       document.getElementById("peerHud").textContent="подключение...";
       var h=peer.connect(ROOM,{serialization:"json"});
+      setupConn(h);
       h.on("open",function(){
-        setupConn(h);
         document.getElementById("peerHud").textContent="в игре";
       });
-      h.on("error",function(){
-        document.getElementById("peerHud").textContent="ошибка";
-      });
     });
+    // Принимаем входящие от других клиентов (из списка peers)
     peer.on("connection",function(conn){
-      conn.on("open",function(){setupConn(conn);});
+      setupConn(conn);
     });
     peer.on("error",function(){});
   }
